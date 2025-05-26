@@ -1,6 +1,6 @@
 _base_ = [
     '../_base_/models/ssd300.py', '../_base_/datasets/voc0712.py',
-    '../_base_/schedules/schedule_2x.py', '../_base_/default_runtime.py'
+    '../_base_/schedules/schedule_cus.py', '../_base_/default_runtime.py'
 ]
 model = dict(
     bbox_head=dict(
@@ -48,7 +48,7 @@ train_dataloader = dict(
     dataset=dict(  # RepeatDataset
         # the dataset is repeated 10 times, and the training schedule is 2x,
         # so the actual epoch = 12 * 10 = 120.
-        times=10,
+        times=1,
         dataset=dict(  # ConcatDataset
             # VOCDataset will add different `dataset_type` in dataset.metainfo,
             # which will get error if using ConcatDataset. Adding
@@ -60,13 +60,6 @@ train_dataloader = dict(
                     data_root=data_root,
                     ann_file='VOC2007/ImageSets/Main/trainval.txt',
                     data_prefix=dict(sub_data_root='VOC2007/'),
-                    filter_cfg=dict(filter_empty_gt=True, min_size=32),
-                    pipeline=train_pipeline),
-                dict(
-                    type=dataset_type,
-                    data_root=data_root,
-                    ann_file='VOC2012/ImageSets/Main/trainval.txt',
-                    data_prefix=dict(sub_data_root='VOC2012/'),
                     filter_cfg=dict(filter_empty_gt=True, min_size=32),
                     pipeline=train_pipeline)
             ])))
@@ -90,7 +83,7 @@ param_scheduler = [
     dict(
         type='MultiStepLR',
         begin=0,
-        end=24,
+        end=1,
         by_epoch=True,
         milestones=[16, 20],
         gamma=0.1)

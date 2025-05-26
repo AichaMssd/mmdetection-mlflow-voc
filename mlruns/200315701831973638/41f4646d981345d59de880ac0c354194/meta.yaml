@@ -1,0 +1,15 @@
+artifact_uri: file:///home/ubuntu/mmdetection/mlruns/200315701831973638/41f4646d981345d59de880ac0c354194/artifacts
+end_time: 1745412997181
+entry_point_name: ''
+experiment_id: '200315701831973638'
+lifecycle_stage: active
+run_id: 41f4646d981345d59de880ac0c354194
+run_name: resilient-loon-103
+run_uuid: 41f4646d981345d59de880ac0c354194
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1745412997170
+status: 3
+tags: []
+user_id: ubuntu

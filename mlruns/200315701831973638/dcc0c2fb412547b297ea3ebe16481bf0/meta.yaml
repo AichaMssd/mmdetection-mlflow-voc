@@ -1,0 +1,15 @@
+artifact_uri: file:///home/ubuntu/mmdetection/mlruns/200315701831973638/dcc0c2fb412547b297ea3ebe16481bf0/artifacts
+end_time: 1745413537888
+entry_point_name: ''
+experiment_id: '200315701831973638'
+lifecycle_stage: active
+run_id: dcc0c2fb412547b297ea3ebe16481bf0
+run_name: sedate-grub-111
+run_uuid: dcc0c2fb412547b297ea3ebe16481bf0
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1745413537877
+status: 3
+tags: []
+user_id: ubuntu

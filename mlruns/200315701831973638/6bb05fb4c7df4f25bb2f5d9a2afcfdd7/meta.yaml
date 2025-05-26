@@ -1,0 +1,15 @@
+artifact_uri: file:///home/ubuntu/mmdetection/mlruns/200315701831973638/6bb05fb4c7df4f25bb2f5d9a2afcfdd7/artifacts
+end_time: 1748262737284
+entry_point_name: ''
+experiment_id: '200315701831973638'
+lifecycle_stage: active
+run_id: 6bb05fb4c7df4f25bb2f5d9a2afcfdd7
+run_name: SingleStageDetector_SSDVGGSSDNeck_20250526_122851
+run_uuid: 6bb05fb4c7df4f25bb2f5d9a2afcfdd7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1748262531803
+status: 3
+tags: []
+user_id: ubuntu

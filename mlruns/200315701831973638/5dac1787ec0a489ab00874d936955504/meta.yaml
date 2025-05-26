@@ -1,0 +1,15 @@
+artifact_uri: file:///home/ubuntu/mmdetection/mlruns/200315701831973638/5dac1787ec0a489ab00874d936955504/artifacts
+end_time: 1745413345209
+entry_point_name: ''
+experiment_id: '200315701831973638'
+lifecycle_stage: active
+run_id: 5dac1787ec0a489ab00874d936955504
+run_name: ssd300_voc0712
+run_uuid: 5dac1787ec0a489ab00874d936955504
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1745413345172
+status: 3
+tags: []
+user_id: ubuntu

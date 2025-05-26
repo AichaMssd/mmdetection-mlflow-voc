@@ -8,7 +8,10 @@ from mmengine.registry import RUNNERS
 from mmengine.runner import Runner
 
 from mmdet.utils import setup_cache_size_limit_of_dynamo
-
+import warnings
+warnings.filterwarnings('ignore')
+import mlflow
+from datetime import datetime
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -103,19 +106,46 @@ def main():
     elif args.resume is not None:
         cfg.resume = True
         cfg.load_from = args.resume
+    # MLflow 
+    mlflow.set_tracking_uri("file:./mlruns")
+    mlflow.set_experiment("mmdet-training-test")
+
+    model_type = cfg.model.get('type', 'unknown')
+    backbone = cfg.model.get('backbone', {}).get('type', 'unknown')
+    neck = cfg.model.get('neck', {}).get('type', '')
+    model_name = f"{model_type}_{backbone}{neck}".replace(' ', '')
+
+    mlflow.enable_system_metrics_logging()
+    run_name = f"{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    with mlflow.start_run(run_name=run_name):
+        mlflow.log_params({
+            "config_file": osp.basename(args.config),
+            "learning_rate": cfg.optim_wrapper.optimizer.lr if hasattr(cfg.optim_wrapper, "optimizer") else "unknown",
+            "amp": args.amp,
+            "auto_scale_lr": args.auto_scale_lr,
+            "work_dir": cfg.work_dir,
+            "model_name": model_name,
+        })
 
     # build the runner from config
-    if 'runner_type' not in cfg:
+        if 'runner_type' not in cfg:
         # build the default runner
-        runner = Runner.from_cfg(cfg)
-    else:
+            runner = Runner.from_cfg(cfg)
+        else:
         # build customized runner from the registry
         # if 'runner_type' is set in the cfg
-        runner = RUNNERS.build(cfg)
+            runner = RUNNERS.build(cfg)
 
-    # start training
-    runner.train()
+        # start training
+        runner.train()
 
+        map_scalar = runner.message_hub.get_scalar('val/pascal_voc/mAP')
+        ap50_scalar = runner.message_hub.get_scalar('val/pascal_voc/AP50')
+
+        if map_scalar is not None:
+            mlflow.log_metric("val_mAP", map_scalar.current())
+        if ap50_scalar is not None:
+            mlflow.log_metric("val_AP50", ap50_scalar.current())
 
 if __name__ == '__main__':
     main()
