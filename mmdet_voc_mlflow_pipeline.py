@@ -98,6 +98,10 @@ download_voc('{dataset_name}', './data')
             print(f"    - Annotations: {(year_path / 'Annotations').exists()}")
             print(f"    - JPEGImages: {(year_path / 'JPEGImages').exists()}")
             print(f"    - ImageSets: {(year_path / 'ImageSets').exists()}")
+            
+            # List some files for debugging
+            if (year_path / 'ImageSets' / 'Main').exists():
+                print(f"    - ImageSets/Main files: {list((year_path / 'ImageSets' / 'Main').glob('*.txt'))[:5]}")
 
 # Component 2: Train SSD model with MLflow tracking
 @dsl.component(
@@ -128,18 +132,17 @@ def train_ssd_with_mlflow(
     if mlflow_tracking_uri:
         mlflow.set_tracking_uri(mlflow_tracking_uri)
     else:
-        # Use local file store when no URI provided
+        # Use local file store
         mlflow_dir = Path('./mlruns')
         mlflow_dir.mkdir(exist_ok=True)
         mlflow.set_tracking_uri(f'file://{mlflow_dir.absolute()}')
     
+    # Create or get experiment
     try:
-        # First, try to get the experiment by name
         experiment = mlflow.get_experiment_by_name(mlflow_experiment_name)
         if experiment is None:
             print(f"Creating new MLflow experiment: {mlflow_experiment_name}")
             experiment_id = mlflow.create_experiment(mlflow_experiment_name)
-            print(f"Created experiment with ID: {experiment_id}")
         else:
             print(f"Using existing MLflow experiment: {mlflow_experiment_name} (ID: {experiment.experiment_id})")
             experiment_id = experiment.experiment_id
@@ -148,7 +151,7 @@ def train_ssd_with_mlflow(
         print("Using default experiment")
         experiment_id = "0"
     
-
+    # Set the experiment
     mlflow.set_experiment(mlflow_experiment_name)
     
     # Clone your modified repo if provided
@@ -159,79 +162,113 @@ def train_ssd_with_mlflow(
 
         # Fix MKL threading conflict
         import numpy
+        print(f"Numpy version: {numpy.__version__}")
+        
+        # Set MKL threading layer to avoid conflicts
+        os.environ['MKL_SERVICE_FORCE_INTEL'] = '1'
         
         # Install in editable mode to use your modifications
         subprocess.run(['pip', 'install', '-e', '.'], check=True)
+        
+        # Install missing libraries for OpenCV
+        subprocess.run(['apt-get', 'update'], check=True)
+        subprocess.run(['apt-get', 'install', '-y', 'libgl1-mesa-glx', 'libglib2.0-0'], check=True)
     
-    # Create custom config with correct data paths
-    data_root = Path(dataset.path) / 'VOCdevkit'
+    # CRITICAL FIX: Correctly set the data root
+    # The dataset.path already contains the full path including VOCdevkit
+    data_root = Path(dataset.path)
     
-    custom_config = f'''
+    # Debug: Check the actual structure
+    print(f"Dataset path: {data_root}")
+    print(f"Contents of dataset path: {list(data_root.iterdir())}")
+    
+    # Check if VOCdevkit is directly in data_root or if data_root IS VOCdevkit
+    if (data_root / 'VOCdevkit').exists():
+        # VOCdevkit is a subdirectory
+        data_root = data_root / 'VOCdevkit'
+        print(f"Found VOCdevkit at: {data_root}")
+    elif data_root.name == 'VOCdevkit':
+        # data_root is already VOCdevkit
+        print(f"data_root is already VOCdevkit: {data_root}")
+    else:
+        # Check if VOC2007 is directly in data_root (in case of different structure)
+        if (data_root / 'VOC2007').exists():
+            print(f"Found VOC2007 directly in data_root: {data_root}")
+        else:
+            raise RuntimeError(f"Could not find VOCdevkit or VOC2007 in {data_root}")
+    
+    # Verify the expected files exist
+    voc2007_path = data_root / 'VOC2007'
+    if voc2007_path.exists():
+        print(f"VOC2007 path: {voc2007_path}")
+        print(f"VOC2007 contents: {list(voc2007_path.iterdir())[:10]}")
+        
+        trainval_file = voc2007_path / 'ImageSets' / 'Main' / 'trainval.txt'
+        test_file = voc2007_path / 'ImageSets' / 'Main' / 'test.txt'
+        
+        if trainval_file.exists():
+            print(f"✓ Found trainval.txt at: {trainval_file}")
+        else:
+            print(f"✗ trainval.txt not found at: {trainval_file}")
+            print(f"  ImageSets/Main contents: {list((voc2007_path / 'ImageSets' / 'Main').glob('*.txt'))}")
+        
+        if test_file.exists():
+            print(f"✓ Found test.txt at: {test_file}")
+        else:
+            print(f"✗ test.txt not found at: {test_file}")
+    
+    # Check if we can use the existing config
+    existing_config_path = Path(config_path)
+    if existing_config_path.exists():
+        print(f"Using existing config: {existing_config_path}")
+        # Read the existing config and modify it
+        with open(existing_config_path, 'r') as f:
+            config_content = f.read()
+        
+        # Create a modified version with our data path
+        custom_config = f'''
 # Based on {config_path}
-_base_ = [
-    '../_base_/models/ssd300.py',
-    '../_base_/datasets/voc0712.py',
-    '../_base_/default_runtime.py'
-]
+_base_ = '{existing_config_path}'
 
-# Data settings
+# Override data settings with our paths
 data_root = '{data_root}/'
 data = dict(
     samples_per_gpu={batch_size},
     workers_per_gpu=4,
     train=dict(
-        _delete_=True,
-        type='RepeatDataset',
-        times=1,
-        dataset=dict(
-            type='VOCDataset',
-            data_root=data_root,
-            ann_file=data_root + 'VOC2007/ImageSets/Main/trainval.txt',
-            img_prefix=data_root + 'VOC2007/',
-            pipeline=[
-                dict(type='LoadImageFromFile', backend_args=None),
-                dict(type='LoadAnnotations', with_bbox=True),
-                dict(type='Resize', img_scale=(300, 300), keep_ratio=False),
-                dict(type='RandomFlip', flip_ratio=0.5),
-                dict(type='PhotoMetricDistortion'),
-                dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[1, 1, 1]),
-                dict(type='Pad', size_divisor=1),
-                dict(type='DefaultFormatBundle'),
-                dict(type='Collect', keys=['img', 'gt_bboxes', 'gt_labels']),
-            ]
-        )
+        type='VOCDataset',
+        data_root='{data_root}/',
+        ann_file='VOC2007/ImageSets/Main/trainval.txt',
+        data_prefix=dict(sub_data_root='VOC2007/'),
     ),
     val=dict(
         type='VOCDataset',
-        data_root=data_root,
-        ann_file=data_root + 'VOC2007/ImageSets/Main/test.txt',
-        img_prefix=data_root + 'VOC2007/',
-        test_mode=True,
-        pipeline=[
-            dict(type='LoadImageFromFile', backend_args=None),
-            dict(type='Resize', img_scale=(300, 300), keep_ratio=False),
-            dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[1, 1, 1]),
-            dict(type='Pad', size_divisor=1),
-            dict(type='ImageToTensor', keys=['img']),
-            dict(type='Collect', keys=['img']),
-        ]
+        data_root='{data_root}/',
+        ann_file='VOC2007/ImageSets/Main/test.txt',
+        data_prefix=dict(sub_data_root='VOC2007/'),
     ),
     test=dict(
         type='VOCDataset',
-        data_root=data_root,
-        ann_file=data_root + 'VOC2007/ImageSets/Main/test.txt',
-        img_prefix=data_root + 'VOC2007/',
-        test_mode=True,
-        pipeline=[
-            dict(type='LoadImageFromFile', backend_args=None),
-            dict(type='Resize', img_scale=(300, 300), keep_ratio=False),
-            dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[1, 1, 1]),
-            dict(type='Pad', size_divisor=1),
-            dict(type='ImageToTensor', keys=['img']),
-            dict(type='Collect', keys=['img']),
-        ]
+        data_root='{data_root}/',
+        ann_file='VOC2007/ImageSets/Main/test.txt',
+        data_prefix=dict(sub_data_root='VOC2007/'),
     )
 )
+
+# Override training settings
+optimizer = dict(lr={learning_rate})
+runner = dict(max_epochs={num_epochs})
+'''
+    else:
+        print(f"Config not found at {existing_config_path}, creating self-contained config")
+        # Create a self-contained config if the base doesn't exist
+        custom_config = f'''
+# Self-contained SSD300 VOC configuration
+_base_ = [
+    '../_base_/models/ssd300.py',
+    '../_base_/schedules/schedule_2x.py', 
+    '../_base_/default_runtime.py'
+]
 
 # Model settings
 model = dict(
@@ -240,95 +277,299 @@ model = dict(
     )
 )
 
-# Optimizer
-optimizer = dict(type='SGD', lr={learning_rate}, momentum=0.9, weight_decay=5e-4)
-optimizer_config = dict()
+# Dataset settings
+dataset_type = 'VOCDataset'
+data_root = '{data_root}/'
+backend_args = None
 
-# Learning policy
-lr_config = dict(
-    policy='step',
-    warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=0.001,
-    step=[16, 22])
+train_pipeline = [
+    dict(type='LoadImageFromFile', backend_args=backend_args),
+    dict(type='LoadAnnotations', with_bbox=True),
+    dict(type='Resize', scale=(300, 300), keep_ratio=False),
+    dict(type='RandomFlip', prob=0.5),
+    dict(
+        type='PhotoMetricDistortion',
+        brightness_delta=32,
+        contrast_range=(0.5, 1.5),
+        saturation_range=(0.5, 1.5),
+        hue_delta=18),
+    dict(
+        type='Expand',
+        mean=[123.675, 116.28, 103.53],
+        to_rgb=True,
+        ratio_range=(1, 4)),
+    dict(
+        type='MinIoURandomCrop',
+        min_ious=(0.1, 0.3, 0.5, 0.7, 0.9),
+        min_crop_size=0.3),
+    dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[1, 1, 1]),
+    dict(type='Pad', size_divisor=1),
+    dict(type='PackDetInputs')
+]
+
+test_pipeline = [
+    dict(type='LoadImageFromFile', backend_args=backend_args),
+    dict(type='Resize', scale=(300, 300), keep_ratio=False),
+    dict(type='Normalize', mean=[123.675, 116.28, 103.53], std=[1, 1, 1]),
+    dict(type='Pad', size_divisor=1),
+    dict(type='PackDetInputs', meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape', 'scale_factor'))
+]
+
+train_dataloader = dict(
+    batch_size={batch_size},
+    num_workers=4,
+    persistent_workers=True,
+    sampler=dict(type='DefaultSampler', shuffle=True),
+    batch_sampler=dict(type='AspectRatioBatchSampler'),
+    dataset=dict(
+        type='RepeatDataset',
+        times=1,
+        dataset=dict(
+            type=dataset_type,
+            data_root=data_root,
+            ann_file='VOC2007/ImageSets/Main/trainval.txt',
+            data_prefix=dict(sub_data_root='VOC2007/'),
+            filter_cfg=dict(
+                filter_empty_gt=True, min_size=32, bbox_min_size=32),
+            pipeline=train_pipeline,
+            backend_args=backend_args)))
+
+val_dataloader = dict(
+    batch_size=1,
+    num_workers=4,
+    persistent_workers=True,
+    drop_last=False,
+    sampler=dict(type='DefaultSampler', shuffle=False),
+    dataset=dict(
+        type=dataset_type,
+        data_root=data_root,
+        ann_file='VOC2007/ImageSets/Main/test.txt',
+        data_prefix=dict(sub_data_root='VOC2007/'),
+        test_mode=True,
+        pipeline=test_pipeline,
+        backend_args=backend_args))
+
+test_dataloader = val_dataloader
+
+# Evaluation
+val_evaluator = dict(
+    type='VOCMetric',
+    metric='mAP',
+    eval_mode='11points')
+test_evaluator = val_evaluator
+
+# Optimizer
+optim_wrapper = dict(
+    type='OptimWrapper',
+    optimizer=dict(type='SGD', lr={learning_rate}, momentum=0.9, weight_decay=5e-4))
+
+# Learning rate scheduler
+param_scheduler = [
+    dict(
+        type='LinearLR', start_factor=0.001, by_epoch=False, begin=0, end=500),
+    dict(
+        type='MultiStepLR',
+        begin=0,
+        end={num_epochs},
+        by_epoch=True,
+        milestones=[16, 22],
+        gamma=0.1)
+]
+
+# Training schedule
+train_cfg = dict(
+    type='EpochBasedTrainLoop', 
+    max_epochs={num_epochs}, 
+    val_interval=1)
+val_cfg = dict(type='ValLoop')
+test_cfg = dict(type='TestLoop')
 
 # Runtime settings
-runner = dict(type='EpochBasedRunner', max_epochs={num_epochs})
-checkpoint_config = dict(interval=1)
-log_config = dict(
-    interval=50,
-    hooks=[
-        dict(type='TextLoggerHook'),
-        dict(type='TensorboardLoggerHook')
-    ])
+default_scope = 'mmdet'
+default_hooks = dict(
+    timer=dict(type='IterTimerHook'),
+    logger=dict(type='LoggerHook', interval=50),
+    param_scheduler=dict(type='ParamSchedulerHook'),
+    checkpoint=dict(type='CheckpointHook', interval=1),
+    sampler_seed=dict(type='DistSamplerSeedHook'),
+    visualization=dict(type='DetVisualizationHook'))
 
-evaluation = dict(interval=1, metric='mAP')
+env_cfg = dict(
+    cudnn_benchmark=True,
+    mp_cfg=dict(mp_start_method='fork', opencv_num_threads=0),
+    dist_cfg=dict(backend='nccl'))
+
+vis_backends = [dict(type='LocalVisBackend')]
+visualizer = dict(
+    type='DetLocalVisualizer', vis_backends=vis_backends, name='visualizer')
+log_processor = dict(type='LogProcessor', window_size=50, by_epoch=True)
+
+log_level = 'INFO'
+load_from = None
+resume = False
 
 # Work directory
 work_dir = './work_dirs/ssd300_voc_kubeflow'
-
-# For better performance on VOC
-cudnn_benchmark = True
 '''
     
     # Save custom config
     with open('custom_ssd_config.py', 'w') as f:
         f.write(custom_config)
     
+    # Also save it in the configs directory to ensure proper resolution
+    os.makedirs('configs/custom', exist_ok=True)
+    shutil.copy('custom_ssd_config.py', 'configs/custom/custom_ssd_config.py')
+    
     # Save config for later use
     shutil.copy('custom_ssd_config.py', config_output.path)
     
     # Start MLflow run
-    with mlflow.start_run() as run:
-        # Log parameters
-        mlflow.log_param("model_type", "ssd300")
-        mlflow.log_param("dataset", "voc2007")  # Changed to voc2007
-        mlflow.log_param("num_epochs", num_epochs)
-        mlflow.log_param("batch_size", batch_size)
-        mlflow.log_param("learning_rate", learning_rate)
-        mlflow.log_param("optimizer", "SGD")
+    try:
+        with mlflow.start_run() as run:
+            # Log parameters
+            mlflow.log_param("model_type", "ssd300")
+            mlflow.log_param("dataset", "voc2007")
+            mlflow.log_param("num_epochs", num_epochs)
+            mlflow.log_param("batch_size", batch_size)
+            mlflow.log_param("learning_rate", learning_rate)
+            mlflow.log_param("optimizer", "SGD")
+            mlflow.log_param("config_path", config_path)
+            
+            # Log the config file
+            mlflow.log_artifact('custom_ssd_config.py')
+            
+            # Run training
+            print("Starting training with MLflow tracking...")
+            print(f"MLflow Run ID: {run.info.run_id}")
+            print(f"MLflow Experiment ID: {run.info.experiment_id}")
+            
+            # If you have your modified train.py with MLflow
+            if github_repo and os.path.exists('tools/train.py'):
+                # Use your train.py which should have MLflow integration
+                cmd = [
+                    'python', 'tools/train.py',
+                    'custom_ssd_config.py',
+                    '--work-dir', './work_dirs/ssd300_voc_kubeflow'
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                print(result.stdout)
+                if result.returncode != 0:
+                    print(f"Error: {result.stderr}")
+                    raise RuntimeError(f"Training failed: {result.stderr}")
+            else:
+                # Fallback: use standard MMDetection training without your modifications
+                print("Warning: No custom train.py found. Using standard MMDetection training.")
+                print("MLflow metrics logging may be limited.")
+                
+                # Import and use MMDetection's train API directly
+                try:
+                    from mmdet.apis import train_detector
+                    from mmdet.models import build_detector
+                    from mmcv import Config
+                    from mmdet.datasets import build_dataset
+                    
+                    cfg = Config.fromfile('custom_ssd_config.py')
+                    
+                    # Build dataset
+                    datasets = [build_dataset(cfg.data.train)]
+                    
+                    # Build model
+                    model = build_detector(
+                        cfg.model,
+                        train_cfg=cfg.get('train_cfg'),
+                        test_cfg=cfg.get('test_cfg'))
+                    model.init_weights()
+                    
+                    # Train
+                    train_detector(
+                        model,
+                        datasets,
+                        cfg,
+                        distributed=False,
+                        validate=True)
+                        
+                except ImportError:
+                    print("MMDetection API not available. Running train.py script.")
+                    cmd = [
+                        'python', '-m', 'mmdet.tools.train',
+                        'custom_ssd_config.py',
+                        '--work-dir', './work_dirs/ssd300_voc_kubeflow'
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    print(result.stdout)
+                    if result.returncode != 0:
+                        print(f"Error: {result.stderr}")
+            
+            # Find and save the best model
+            work_dir = Path('./work_dirs/ssd300_voc_kubeflow')
+            checkpoints = list(work_dir.glob('epoch_*.pth'))
+            
+            if checkpoints:
+                # Get the latest checkpoint
+                latest_checkpoint = sorted(checkpoints, key=lambda x: int(x.stem.split('_')[1]))[-1]
+                
+                # Copy model to output
+                shutil.copy(latest_checkpoint, model_output.path)
+                print(f"Model saved to {model_output.path}")
+                
+                # Log model to MLflow
+                try:
+                    mlflow.pytorch.log_model(
+                        pytorch_model=model_output.path,
+                        artifact_path="model",
+                        registered_model_name="ssd300_voc2007"
+                    )
+                except Exception as e:
+                    print(f"Warning: Could not log model to MLflow registry: {e}")
+                    # Just log as artifact instead
+                    mlflow.log_artifact(str(latest_checkpoint), "model")
+                
+                # Log final metrics
+                mlflow.log_metric("final_epoch", int(latest_checkpoint.stem.split('_')[1]))
+                
+            else:
+                raise RuntimeError("No checkpoint found after training!")
+            
+            # Log metrics to KFP
+            metrics_output.log_metric('epochs_trained', num_epochs)
+            metrics_output.log_metric('mlflow_run_id', run.info.run_id)
+            
+            print(f"Training completed! MLflow run ID: {run.info.run_id}")
+            
+    except Exception as e:
+        print(f"Error during MLflow tracking: {e}")
+        print("Continuing without MLflow tracking...")
         
-        # Run training
-        print("Starting training with MLflow tracking...")
-        
-        # If you have your modified train.py with MLflow
-        if github_repo or os.path.exists('tools/train.py'):
-            # Use your train.py which should have MLflow integration
+        # Run training without MLflow if it fails
+        if github_repo and os.path.exists('tools/train.py'):
             cmd = [
                 'python', 'tools/train.py',
                 'custom_ssd_config.py',
                 '--work-dir', './work_dirs/ssd300_voc_kubeflow'
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            print(result.stdout)
-            if result.returncode != 0:
-                print(f"Error: {result.stderr}")
-                raise RuntimeError(f"Training failed: {result.stderr}")
+        else:
+            cmd = [
+                'python', '-m', 'mmdet.tools.train',
+                'custom_ssd_config.py',
+                '--work-dir', './work_dirs/ssd300_voc_kubeflow'
+            ]
+            
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        print(result.stdout)
+        if result.returncode != 0:
+            print(f"Error: {result.stderr}")
+            raise RuntimeError(f"Training failed: {result.stderr}")
         
-        # Find and save the best model
+        # Save model even if MLflow fails
         work_dir = Path('./work_dirs/ssd300_voc_kubeflow')
         checkpoints = list(work_dir.glob('epoch_*.pth'))
-        
         if checkpoints:
-            # Get the latest checkpoint
             latest_checkpoint = sorted(checkpoints, key=lambda x: int(x.stem.split('_')[1]))[-1]
-            
-            # Copy model to output
             shutil.copy(latest_checkpoint, model_output.path)
             print(f"Model saved to {model_output.path}")
-            
-            # Log model to MLflow
-            mlflow.pytorch.log_model(
-                pytorch_model=model_output.path,
-                artifact_path="model",
-                registered_model_name="ssd300_voc2007"  # Changed name
-            )
+            metrics_output.log_metric('epochs_trained', num_epochs)
         else:
             raise RuntimeError("No checkpoint found after training!")
-        
-        # Log final metrics
-        metrics_output.log_metric('epochs_trained', num_epochs)
-        print(f"Training completed! MLflow run ID: {run.info.run_id}")
 
 # Define the pipeline
 @dsl.pipeline(
