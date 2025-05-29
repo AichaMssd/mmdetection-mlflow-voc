@@ -10,9 +10,7 @@ from kfp.dsl import Input, Output, Dataset, Model, Metrics, Artifact
         'pycocotools==2.0.7',
         'lxml',
         'tqdm==4.65.2',
-        'requests==2.28.2',
-        'mmengine==0.10.7',
-        'mmcv==2.0.0'
+        'requests==2.28.2'
     ]
 )
 def prepare_voc_dataset(
@@ -35,7 +33,7 @@ def prepare_voc_dataset(
     print(f"Downloading VOC dataset: {dataset_name}")
     
     # Download using the MMDetection download script
-    download_script = '''
+    download_script = f'''
 import os
 import urllib.request
 import tarfile
@@ -44,7 +42,7 @@ from pathlib import Path
 
 def download_voc(dataset_name, save_dir):
     """Download VOC dataset"""
-    urls = {
+    urls = {{
         'voc2007': [
             ('http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCtrainval_06-Nov-2007.tar', 'VOCtrainval_06-Nov-2007.tar'),
             ('http://host.robots.ox.ac.uk/pascal/VOC/voc2007/VOCtest_06-Nov-2007.tar', 'VOCtest_06-Nov-2007.tar'),
@@ -53,14 +51,13 @@ def download_voc(dataset_name, save_dir):
         'voc2012': [
             ('http://host.robots.ox.ac.uk/pascal/VOC/voc2012/VOCtrainval_11-May-2012.tar', 'VOCtrainval_11-May-2012.tar')
         ]
-    }
+    }}
     
     save_path = Path(save_dir)
     save_path.mkdir(parents=True, exist_ok=True)
     
     # Download files
     if dataset_name == 'voc0712':
-        # Download both 2007 and 2012
         download_files = urls['voc2007'] + urls['voc2012']
     else:
         download_files = urls.get(dataset_name, [])
@@ -68,27 +65,24 @@ def download_voc(dataset_name, save_dir):
     for url, filename in download_files:
         filepath = save_path / filename
         if not filepath.exists():
-            print(f"Downloading {filename}...")
+            print(f"Downloading {{filename}}...")
             urllib.request.urlretrieve(url, filepath)
         
-        # Extract
-        print(f"Extracting {filename}...")
+        print(f"Extracting {{filename}}...")
         if filename.endswith('.tar'):
             with tarfile.open(filepath, 'r') as tar:
                 tar.extractall(save_path)
         elif filename.endswith('.zip'):
             with zipfile.ZipFile(filepath, 'r') as zip_ref:
                 zip_ref.extractall(save_path)
-        
-        # Remove archive after extraction
         os.remove(filepath)
-    
-    print(f"VOC dataset downloaded to {save_path}")
+
+    print(f"VOC dataset downloaded to {{save_path}}")
 
 # Run download
-download_voc('{}', './data')
-'''.format(dataset_name)
-    
+download_voc('{dataset_name}', './data')
+'''
+
     # Save and run the download script
     with open('download_voc.py', 'w') as f:
         f.write(download_script)
@@ -120,8 +114,6 @@ download_voc('{}', './data')
         'torch==2.0.1',
         'torchvision==0.15.2',
         'openmim==0.3.9',
-        'mmengine==0.10.7', 
-        'mmcv==2.0.0',
         'opencv-python==4.11.0.86',
         'pycocotools==2.0.7',
         'lxml',
@@ -154,6 +146,13 @@ def train_ssd_with_mlflow(
     import json
     import mlflow
     import mlflow.pytorch
+
+
+    print("Installing mmengine, mmcv-full, and mmdet with mim...")
+    subprocess.run(['mim', 'install', 'mmengine'], check=True)
+    subprocess.run(['mim', 'install', 'mmcv-full'], check=True)
+    subprocess.run(['mim', 'install', 'mmdet'], check=True)
+
     
     # Setup MLflow
     if mlflow_tracking_uri:
