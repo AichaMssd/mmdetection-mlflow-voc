@@ -3,15 +3,7 @@ from kfp.dsl import Input, Output, Dataset, Model, Metrics, Artifact
 
 # Component 1: Download and prepare VOC dataset
 @dsl.component(
-    base_image='pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime',
-    packages_to_install=[
-        'openmim==0.3.9',
-        'opencv-python==4.11.0.86',
-        'pycocotools==2.0.7',
-        'lxml',
-        'tqdm==4.65.2',
-        'requests==2.28.2'
-    ]
+    base_image='valohai/mmdetect-kubeflow'
 )
 def prepare_voc_dataset(
     output_dataset: Output[Dataset],
@@ -109,22 +101,7 @@ download_voc('{dataset_name}', './data')
 
 # Component 2: Train SSD model with MLflow tracking
 @dsl.component(
-    base_image='pytorch/pytorch:2.0.1-cuda11.7-cudnn8-runtime',
-    packages_to_install=[
-        'torch==2.0.1',
-        'torchvision==0.15.2',
-        'openmim==0.3.9',
-        'opencv-python==4.11.0.86',
-        'pycocotools==2.0.7',
-        'lxml',
-        'mlflow==2.17.2',
-        'pandas==2.0.3',
-        'matplotlib==3.7.5',
-        'scipy==1.10.1',
-        'scikit-learn==1.3.2',
-        'tqdm==4.65.2',
-        'requests==2.28.2'
-    ]
+    base_image='valohai/mmdetect-kubeflow'
 )
 def train_ssd_with_mlflow(
     dataset: Input[Dataset],
@@ -146,23 +123,12 @@ def train_ssd_with_mlflow(
     import json
     import mlflow
     import mlflow.pytorch
-
-
-    print("Installing mmengine, mmcv-full, and mmdet with mim...")
-    subprocess.run(['mim', 'install', 'mmengine'], check=True)
-    subprocess.run(['mim', 'install', 'mmcv-full'], check=True)
-    subprocess.run(['mim', 'install', 'mmdet'], check=True)
-
     
     # Setup MLflow
     if mlflow_tracking_uri:
         mlflow.set_tracking_uri(mlflow_tracking_uri)
     
     mlflow.set_experiment(mlflow_experiment_name)
-    
-    # Install MMDetection
-    print("Installing MMDetection...")
-    subprocess.run(['mim', 'install', 'mmdet'], check=True)
     
     # Clone your modified repo if provided
     if github_repo:
