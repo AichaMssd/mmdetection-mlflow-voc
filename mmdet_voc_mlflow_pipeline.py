@@ -135,6 +135,9 @@ def train_ssd_with_mlflow(
         print(f"Cloning custom repo from {github_repo}")
         subprocess.run(['git', 'clone', github_repo, 'mmdetection'], check=True)
         os.chdir('mmdetection')
+
+        # Fix MKL threading conflict
+        import numpy
         
         # Install in editable mode to use your modifications
         subprocess.run(['pip', 'install', '-e', '.'], check=True)
