@@ -127,7 +127,28 @@ def train_ssd_with_mlflow(
     # Setup MLflow
     if mlflow_tracking_uri:
         mlflow.set_tracking_uri(mlflow_tracking_uri)
+    else:
+        # Use local file store when no URI provided
+        mlflow_dir = Path('./mlruns')
+        mlflow_dir.mkdir(exist_ok=True)
+        mlflow.set_tracking_uri(f'file://{mlflow_dir.absolute()}')
     
+    try:
+        # First, try to get the experiment by name
+        experiment = mlflow.get_experiment_by_name(mlflow_experiment_name)
+        if experiment is None:
+            print(f"Creating new MLflow experiment: {mlflow_experiment_name}")
+            experiment_id = mlflow.create_experiment(mlflow_experiment_name)
+            print(f"Created experiment with ID: {experiment_id}")
+        else:
+            print(f"Using existing MLflow experiment: {mlflow_experiment_name} (ID: {experiment.experiment_id})")
+            experiment_id = experiment.experiment_id
+    except Exception as e:
+        print(f"Error with MLflow experiment setup: {e}")
+        print("Using default experiment")
+        experiment_id = "0"
+    
+
     mlflow.set_experiment(mlflow_experiment_name)
     
     # Clone your modified repo if provided
